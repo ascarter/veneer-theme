@@ -1,0 +1,46 @@
+[
+  {
+    "label": "build",
+    "command": "cargo build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "show_summary": true,
+    "show_command": true
+  },
+  {
+    "label": "install",
+    "command": "cargo install --path .",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "show_summary": true,
+    "show_command": true
+  },
+  {
+    "label": "test",
+    "command": "cargo test",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "show_summary": true,
+    "show_command": true
+  },
+  {
+    "label": "clean",
+    "command": "cargo clean",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "dock",
+    "hide": "never",
+    "show_summary": true,
+    "show_command": true
+  }
+]
