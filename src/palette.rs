@@ -20,7 +20,6 @@ pub struct Palette {
 pub struct Meta {
     pub name: String,
     pub version: Option<String>,
-    pub slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

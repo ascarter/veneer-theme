@@ -20,7 +20,6 @@ fn print_palette(palette_path: &PathBuf, palette: &ResolvedPalette) {
     if let Some(version) = palette.meta.version.as_ref() {
         println!("Version: {version}");
     }
-    println!("Slug: {}", palette.meta.slug.as_deref().unwrap_or("<none>"));
     println!();
 
     let label_width = max_label_width(palette);
