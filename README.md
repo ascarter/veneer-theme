@@ -18,8 +18,10 @@ cargo run -- <command>
 ```
 
 ## CLI
-- `veneer build <template.tera> [dest] [--palette veneer.toml]`  
-  Renders the template and writes to `dest` (file or directory). Defaults to the current directory, stripping `.tera` from the filename.
+- `veneer build <src> [dest] [--palette veneer.toml]`  
+  Render one or many templates. `src` can be a single file, a directory (all `*.tera` inside, recursively), or a glob such as `src/*.tera`.  
+  - Single file: `dest` may be a file or directory (default: current directory, stripping `.tera`).  
+  - Directory or glob: `dest` may be a directory or a filename prefix. If it points to an existing directory (or ends with `/`), files render into that directory with relative paths preserved and `.tera` removed. Otherwise `dest` is treated as a prefix and the matched path (minus `.tera`) is appended.
 - `veneer check --palette veneer.toml <template.tera>`  
   Validates palette + template rendering without writing files.
 - `veneer show --palette veneer.toml`  
@@ -95,9 +97,17 @@ When rendering, the Tera context exposes:
 - `accents` (map)
 - `ansi.light.normal`, `ansi.light.bright`, `ansi.dark.normal`, `ansi.dark.bright`
 
-Helpers registered in Tera:
-- Functions: `with_alpha(color, alpha)`, `rgba(color, alpha)`, `hsla(color, alpha)`, `rgba_floats(color, alpha)`
-- Filter: `lowercase`
+### Helpers
+- `with_alpha(color, alpha)` → hex with alpha channel.  
+  Example: `{{ with_alpha(color=dark.primary, alpha=0.2) }}` → `#11223333`
+- `rgba(color, alpha)` → CSS `rgba(r, g, b, a)` string.  
+  Example: `{{ rgba(color=light.background, alpha=0.85) }}` → `rgba(255, 255, 255, 0.850)`
+- `hsla(color, alpha)` → CSS `hsla(h, s, l, a)` string.  
+  Example: `{{ hsla(color=accents.info, alpha=0.6) }}` → `hsla(201.600, 0.650, 0.500, 0.600)`
+- `rgba_floats(color, alpha)` → space-separated floats in 0–1 range.  
+  Example: `{{ rgba_floats(color=dark.text, alpha=0.75) }}` → `0.902353 0.929413 0.952941 0.750000`
+- `lowercase` filter → lowercases a string.  
+  Example: `{{ accents.info | lowercase }}` → `#3fa7d6`
 
 Example snippet (`theme.json.tera`):
 ```tera
@@ -116,6 +126,15 @@ Example snippet (`theme.json.tera`):
 Render it:
 ```bash
 veneer build theme.json.tera dist/theme.json --palette veneer.toml
+```
+
+More examples:
+```bash
+# Render every template under src/ into dist/ (directories created as needed)
+veneer build src dist/ --palette veneer.toml
+
+# Glob render with a filename prefix
+veneer build "templates/*.tera" dist/theme- --palette veneer.toml
 ```
 
 ## Development

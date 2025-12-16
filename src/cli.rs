@@ -12,11 +12,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Render a template to an output path.
+    /// Render one or many templates to an output path.
     Build {
-        /// Template file to render (must end with .tera).
+        /// Template source: single file, directory (all .tera), or glob pattern (e.g. src/*.tera).
         src: PathBuf,
-        /// Output file or directory (default: current directory).
+        /// Output path: for single file, file or directory; for patterns, directory or filename prefix.
         dest: Option<PathBuf>,
         /// Palette TOML file.
         #[arg(long, default_value = "veneer.toml")]

@@ -6,38 +6,46 @@ use std::{
 use anyhow::{Context, Result};
 use serde_json::Value;
 use tera::{Context as TeraContext, Tera};
+use walkdir::WalkDir;
 
 use crate::palette::{ResolvedPalette, load_palette, resolve_palette};
 
-pub fn build(
-    palette_path: &PathBuf,
-    template_path: &PathBuf,
-    dest: Option<&PathBuf>,
-) -> Result<()> {
-    let palette = load_palette(palette_path)?;
-    let resolved = resolve_palette(&palette)?;
-    let ctx = build_context(&resolved)?;
+pub fn build(palette_path: &PathBuf, src: &PathBuf, dest: Option<&PathBuf>) -> Result<()> {
+    let ctx = {
+        let palette = load_palette(palette_path)?;
+        let resolved = resolve_palette(&palette)?;
+        build_context(&resolved)?
+    };
 
-    let template = fs::read_to_string(template_path)
-        .with_context(|| format!("reading {}", template_path.display()))?;
+    let src_kind = detect_source_kind(src)?;
+    let (base, templates) = collect_templates(&src_kind)?;
 
-    let mut tera = Tera::default();
-    tera.add_raw_template("inline", &template)
-        .with_context(|| format!("registering template {}", template_path.display()))?;
-    tera.autoescape_on(vec![]);
-    register_helpers(&mut tera);
-
-    let rendered = tera
-        .render("inline", &ctx)
-        .with_context(|| format!("rendering template {}", template_path.display()))?;
-
-    let out_path = determine_out_path(template_path, dest)?;
-    if let Some(parent) = out_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating directory {}", parent.display()))?;
+    if templates.is_empty() {
+        anyhow::bail!("no templates matched {}", src.display());
     }
-    fs::write(&out_path, rendered).with_context(|| format!("writing {}", out_path.display()))?;
-    Ok(())
+
+    match src_kind {
+        SourceKind::SingleFile { path } => {
+            let out_path = determine_out_path(&path, dest)?;
+            render_one(&path, &ctx, &out_path)
+        }
+        _ => {
+            let dest_mode = resolve_dest_mode(dest)?;
+            for path in templates {
+                let rel = path.strip_prefix(&base).unwrap_or(path.as_path());
+                let rel = strip_tera_from_path(rel);
+                let out_path = match &dest_mode {
+                    DestMode::Directory(dir) => dir.join(&rel),
+                    DestMode::Prefix(prefix) => {
+                        let combined = format!("{}{}", prefix.display(), rel.to_string_lossy());
+                        PathBuf::from(combined)
+                    }
+                };
+                render_one(&path, &ctx, &out_path)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 pub fn check_single(palette_path: &PathBuf, template_path: &PathBuf) -> Result<()> {
@@ -106,6 +114,28 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
     tera.register_filter("lowercase", lowercase_filter);
+}
+
+fn render_one(template_path: &Path, ctx: &TeraContext, out_path: &Path) -> Result<()> {
+    let template = fs::read_to_string(template_path)
+        .with_context(|| format!("reading {}", template_path.display()))?;
+
+    let mut tera = Tera::default();
+    tera.add_raw_template("inline", &template)
+        .with_context(|| format!("registering template {}", template_path.display()))?;
+    tera.autoescape_on(vec![]);
+    register_helpers(&mut tera);
+
+    let rendered = tera
+        .render("inline", ctx)
+        .with_context(|| format!("rendering template {}", template_path.display()))?;
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating directory {}", parent.display()))?;
+    }
+    fs::write(out_path, rendered).with_context(|| format!("writing {}", out_path.display()))?;
+    Ok(())
 }
 
 fn with_alpha(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
@@ -234,9 +264,167 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     (h, s, l)
 }
 
+#[derive(Clone)]
+enum SourceKind {
+    SingleFile { path: PathBuf },
+    Directory { root: PathBuf },
+    Glob { pattern: String, base: PathBuf },
+}
+
+fn detect_source_kind(src: &PathBuf) -> Result<SourceKind> {
+    let src_str = src.to_string_lossy();
+    if has_glob_chars(&src_str) {
+        let base = glob_base(&src_str);
+        return Ok(SourceKind::Glob {
+            pattern: src_str.to_string(),
+            base,
+        });
+    }
+
+    if src.is_dir() {
+        return Ok(SourceKind::Directory { root: src.clone() });
+    }
+
+    Ok(SourceKind::SingleFile { path: src.clone() })
+}
+
+fn has_glob_chars(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[') || s.contains('{')
+}
+
+fn glob_base(pattern: &str) -> PathBuf {
+    let idx = pattern
+        .find(|c| matches!(c, '*' | '?' | '[' | '{'))
+        .unwrap_or(pattern.len());
+    let before = &pattern[..idx];
+    let base = match before.rfind(std::path::MAIN_SEPARATOR) {
+        Some(pos) => &before[..=pos],
+        None => "",
+    };
+    PathBuf::from(base)
+}
+
+fn collect_templates(kind: &SourceKind) -> Result<(PathBuf, Vec<PathBuf>)> {
+    match kind {
+        SourceKind::SingleFile { path } => Ok((
+            path.parent().unwrap_or_else(|| Path::new("")).into(),
+            vec![path.clone()],
+        )),
+        SourceKind::Directory { root } => {
+            let mut paths = Vec::new();
+            for entry in WalkDir::new(root)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_file())
+            {
+                if entry.path().extension().and_then(|e| e.to_str()) == Some("tera") {
+                    paths.push(entry.path().to_path_buf());
+                }
+            }
+            Ok((root.clone(), paths))
+        }
+        SourceKind::Glob { pattern, base } => {
+            let mut paths = Vec::new();
+            for entry in glob::glob(pattern)? {
+                let path = entry?;
+                if path.is_file() {
+                    paths.push(path);
+                }
+            }
+            Ok((base.clone(), paths))
+        }
+    }
+}
+
+fn strip_tera_from_path(path: &Path) -> PathBuf {
+    let mut new = path.to_path_buf();
+    if let Some(name) = path.file_name() {
+        let stripped = strip_tera_extension(name);
+        new.set_file_name(stripped);
+    }
+    new
+}
+
+enum DestMode {
+    Directory(PathBuf),
+    Prefix(PathBuf),
+}
+
+fn resolve_dest_mode(dest: Option<&PathBuf>) -> Result<DestMode> {
+    let sep = std::path::MAIN_SEPARATOR;
+    let mode = match dest {
+        None => DestMode::Directory(std::env::current_dir().context("reading current directory")?),
+        Some(path) => {
+            let s = path.to_string_lossy();
+            if path.is_dir() || s.ends_with(sep) {
+                DestMode::Directory(path.clone())
+            } else {
+                DestMode::Prefix(path.clone())
+            }
+        }
+    };
+    Ok(mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    const MINIMAL_PALETTE: &str = r##"
+[meta]
+name = "Test"
+version = "0.0.1"
+
+[colors.light]
+background = "#000000"
+
+[colors.dark]
+background = "#000000"
+
+[accents]
+primary = "#111111"
+
+[ansi.light.normal]
+black="#000000"
+red="#000000"
+green="#000000"
+yellow="#000000"
+blue="#000000"
+magenta="#000000"
+cyan="#000000"
+white="#000000"
+
+[ansi.light.bright]
+black="#111111"
+red="#111111"
+green="#111111"
+yellow="#111111"
+blue="#111111"
+magenta="#111111"
+cyan="#111111"
+white="#111111"
+
+[ansi.dark.normal]
+black="#000000"
+red="#000000"
+green="#000000"
+yellow="#000000"
+blue="#000000"
+magenta="#000000"
+cyan="#000000"
+white="#000000"
+
+[ansi.dark.bright]
+black="#111111"
+red="#111111"
+green="#111111"
+yellow="#111111"
+blue="#111111"
+magenta="#111111"
+cyan="#111111"
+white="#111111"
+"##;
 
     #[test]
     fn lowercase_helper_downcases_text() {
@@ -252,5 +440,52 @@ mod tests {
         let path = Path::new("templates/vscode/themes/theme.json.tera");
         let out = strip_tera_extension(path.file_name().unwrap());
         assert_eq!(out, std::ffi::OsString::from("theme.json"));
+    }
+
+    #[test]
+    fn builds_directory_into_dest_directory() {
+        let tmp = tempdir().unwrap();
+        let palette_path = tmp.path().join("veneer.toml");
+        fs::write(&palette_path, MINIMAL_PALETTE).unwrap();
+
+        let src_dir = tmp.path().join("src");
+        fs::create_dir_all(src_dir.join("nested")).unwrap();
+        fs::write(src_dir.join("one.tera"), "Hello {{ meta.name }}").unwrap();
+        fs::write(
+            src_dir.join("nested").join("two.tera"),
+            "World {{ meta.name }}",
+        )
+        .unwrap();
+
+        let dest_dir = tmp.path().join("out");
+        fs::create_dir_all(&dest_dir).unwrap();
+        build(&palette_path, &src_dir, Some(&dest_dir)).unwrap();
+
+        let one_out = dest_dir.join("one");
+        let two_out = dest_dir.join("nested").join("two");
+        assert_eq!(fs::read_to_string(one_out).unwrap(), "Hello Test");
+        assert_eq!(fs::read_to_string(two_out).unwrap(), "World Test");
+    }
+
+    #[test]
+    fn builds_glob_with_prefix() {
+        let tmp = tempdir().unwrap();
+        let palette_path = tmp.path().join("veneer.toml");
+        fs::write(&palette_path, MINIMAL_PALETTE).unwrap();
+
+        let src_dir = tmp.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("alpha.tera"), "Alpha {{ meta.name }}").unwrap();
+        fs::write(src_dir.join("beta.tera"), "Beta {{ meta.name }}").unwrap();
+
+        let pattern = src_dir.join("*.tera");
+        let prefix = tmp.path().join("dist").join("theme-");
+
+        build(&palette_path, &pattern, Some(&prefix)).unwrap();
+
+        let alpha_out = tmp.path().join("dist").join("theme-alpha");
+        let beta_out = tmp.path().join("dist").join("theme-beta");
+        assert_eq!(fs::read_to_string(alpha_out).unwrap(), "Alpha Test");
+        assert_eq!(fs::read_to_string(beta_out).unwrap(), "Beta Test");
     }
 }
