@@ -141,5 +141,12 @@ veneer build "templates/*.tera" dist/theme- --palette veneer.toml
 - `cargo test` to run unit tests.
 - `cargo run -- show --palette veneer.toml` to preview a palette.
 
+## Example themes
+
+- [ghostty-alpental-theme](https://github.com/ascarter/ghostty-alpental-theme)
+- [vscode-alpental-theme](https://github.com/ascarter/vscode-alpental-theme)
+- [xcode-alpental-theme](https://github.com/ascarter/xcode-alpental-theme)
+- [zed-alpental-theme](https://github.com/ascarter/zed-alpental-theme)
+
 ## License
 MIT, see `LICENSE`.
