@@ -113,6 +113,7 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("rgba", rgba);
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
+    tera.register_function("blend", blend);
     tera.register_filter("lowercase", lowercase_filter);
 }
 
@@ -175,6 +176,33 @@ fn rgba_floats(args: &std::collections::HashMap<String, Value>) -> tera::Result<
     let b = b as f32 / 255.0;
 
     Ok(Value::String(format!("{r:.6} {g:.6} {b:.6} {alpha:.6}")))
+}
+
+/// Alpha-blend `color` at `alpha` over `background`, returning an opaque #RRGGBB hex.
+/// Formula: out_channel = round(alpha * fg + (1 - alpha) * bg) per channel.
+fn blend(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
+    let color = expect_string(args, "color")?;
+    let background = expect_string(args, "background")?;
+    let alpha = expect_number(args, "alpha")?;
+
+    if !(0.0..=1.0).contains(&alpha) {
+        return Err(tera::Error::msg("alpha must be between 0.0 and 1.0"));
+    }
+
+    let (fr, fg, fb) = hex_to_rgb(&color)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {color}")))?;
+    let (br, bg, bb) = hex_to_rgb(&background)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {background}")))?;
+
+    let blend_channel = |f: u8, b: u8| -> u8 {
+        (alpha * f as f32 + (1.0 - alpha) * b as f32).round() as u8
+    };
+
+    let r = blend_channel(fr, br);
+    let g = blend_channel(fg, bg);
+    let b = blend_channel(fb, bb);
+
+    Ok(Value::String(format!("#{r:02X}{g:02X}{b:02X}")))
 }
 
 fn lowercase_filter(
@@ -425,6 +453,35 @@ magenta="#111111"
 cyan="#111111"
 white="#111111"
 "##;
+
+    #[test]
+    fn blend_composites_over_background() {
+        use std::collections::HashMap;
+
+        // 50% black (#000000) over white (#FFFFFF) -> mid-gray (#808080)
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#000000".into()));
+        args.insert("background".into(), Value::String("#FFFFFF".into()));
+        args.insert("alpha".into(), serde_json::json!(0.5));
+        let out = blend(&args).unwrap();
+        assert_eq!(out, Value::String("#808080".into()));
+
+        // alpha=1.0 -> color unchanged
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#AABBCC".into()));
+        args.insert("background".into(), Value::String("#FFFFFF".into()));
+        args.insert("alpha".into(), serde_json::json!(1.0));
+        let out = blend(&args).unwrap();
+        assert_eq!(out, Value::String("#AABBCC".into()));
+
+        // alpha=0.0 -> background unchanged
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#AABBCC".into()));
+        args.insert("background".into(), Value::String("#112233".into()));
+        args.insert("alpha".into(), serde_json::json!(0.0));
+        let out = blend(&args).unwrap();
+        assert_eq!(out, Value::String("#112233".into()));
+    }
 
     #[test]
     fn lowercase_helper_downcases_text() {

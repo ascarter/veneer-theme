@@ -104,9 +104,11 @@ When rendering, the Tera context exposes:
   Example: `{{ rgba(color=light.background, alpha=0.85) }}` → `rgba(255, 255, 255, 0.850)`
 - `hsla(color, alpha)` → CSS `hsla(h, s, l, a)` string.  
   Example: `{{ hsla(color=accents.info, alpha=0.6) }}` → `hsla(201.600, 0.650, 0.500, 0.600)`
-- `rgba_floats(color, alpha)` → space-separated floats in 0–1 range.  
+- `rgba_floats(color, alpha)` → space-separated floats in 0–1 range.
   Example: `{{ rgba_floats(color=dark.text, alpha=0.75) }}` → `0.902353 0.929413 0.952941 0.750000`
-- `lowercase` filter → lowercases a string.  
+- `blend(color, alpha, background)` → opaque `#RRGGBB` hex with alpha pre-composited over `background`. Useful for themes (e.g. Ghostty) that don't support alpha channels.
+  Example: `{{ blend(color=dark.primary, alpha=0.15, background=dark.background) }}` → `#161C27`
+- `lowercase` filter → lowercases a string.
   Example: `{{ accents.info | lowercase }}` → `#3fa7d6`
 
 Example snippet (`theme.json.tera`):
@@ -121,6 +123,12 @@ Example snippet (`theme.json.tera`):
   },
   "accent": "{{ accents.info | lowercase }}"
 }
+```
+
+Example Ghostty template snippet (`ghostty.tera`):
+```tera
+# Selection uses a pre-composited color since Ghostty doesn't support alpha
+selection-background = {{ blend(color=dark.primary, alpha=0.3, background=dark.background) }}
 ```
 
 Render it:
