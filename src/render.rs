@@ -113,6 +113,7 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("rgba", rgba);
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
+    tera.register_function("mix", mix);
     tera.register_function("ron_color", ron_color);
     tera.register_function("ron_rgb", ron_rgb);
     tera.register_function("blend", blend);
@@ -195,6 +196,26 @@ fn ron_color(args: &std::collections::HashMap<String, Value>) -> tera::Result<Va
         b as f32 / 255.0,
         alpha,
     )))
+}
+
+/// Linear interpolation (lerp) between two sRGB hex colors.
+/// Operates directly on the sRGB channel values (0–255) without color-space conversion.
+fn mix(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
+    let a = expect_string(args, "a")?;
+    let b = expect_string(args, "b")?;
+    let t = expect_number(args, "t")?;
+    if !(0.0..=1.0).contains(&t) {
+        return Err(tera::Error::msg("mix: t must be between 0.0 and 1.0"));
+    }
+    let (ar, ag, ab) = hex_to_rgb(&a)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {a}")))?;
+    let (br, bg, bb) = hex_to_rgb(&b)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {b}")))?;
+    let lerp = |a: u8, b: u8| -> u8 {
+        (a as f32 + t * (b as f32 - a as f32)).round() as u8
+    };
+    let (r, g, b) = (lerp(ar, br), lerp(ag, bg), lerp(ab, bb));
+    Ok(Value::String(format!("#{r:02X}{g:02X}{b:02X}")))
 }
 
 fn ron_rgb(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
@@ -541,6 +562,39 @@ white="#111111"
         let out = ron_color(&args).unwrap();
         assert!(out.as_str().unwrap().contains("red: 1.0000000"));
         assert!(out.as_str().unwrap().contains("alpha: 0.5000000"));
+    }
+
+    #[test]
+    fn mix_interpolates_srgb_channels() {
+        use std::collections::HashMap;
+
+        // t=0.0 returns a
+        let mut args = HashMap::new();
+        args.insert("a".into(), Value::String("#000000".into()));
+        args.insert("b".into(), Value::String("#FFFFFF".into()));
+        args.insert("t".into(), serde_json::json!(0.0));
+        assert_eq!(mix(&args).unwrap(), Value::String("#000000".into()));
+
+        // t=1.0 returns b
+        let mut args = HashMap::new();
+        args.insert("a".into(), Value::String("#000000".into()));
+        args.insert("b".into(), Value::String("#FFFFFF".into()));
+        args.insert("t".into(), serde_json::json!(1.0));
+        assert_eq!(mix(&args).unwrap(), Value::String("#FFFFFF".into()));
+
+        // t=0.5 midpoint between black and white is mid-gray
+        let mut args = HashMap::new();
+        args.insert("a".into(), Value::String("#000000".into()));
+        args.insert("b".into(), Value::String("#FFFFFF".into()));
+        args.insert("t".into(), serde_json::json!(0.5));
+        assert_eq!(mix(&args).unwrap(), Value::String("#808080".into()));
+
+        // t out of range is rejected
+        let mut args = HashMap::new();
+        args.insert("a".into(), Value::String("#000000".into()));
+        args.insert("b".into(), Value::String("#FFFFFF".into()));
+        args.insert("t".into(), serde_json::json!(1.5));
+        assert!(mix(&args).is_err());
     }
 
     #[test]

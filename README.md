@@ -108,6 +108,8 @@ When rendering, the Tera context exposes:
   Example: `{{ rgba_floats(color=dark.text, alpha=0.75) }}` → `0.902353 0.929413 0.952941 0.750000`
 - `blend(color, alpha, background)` → opaque `#RRGGBB` hex with alpha pre-composited over `background`. Useful for themes (e.g. Ghostty) that don't support alpha channels.
   Example: `{{ blend(color=dark.primary, alpha=0.15, background=dark.background) }}` → `#161C27`
+- `mix(a, b, t)` → linear interpolation (lerp) between two hex colors, returning an opaque `#RRGGBB` hex. Operates directly on sRGB channel values. `t=0.0` returns `a`, `t=1.0` returns `b`, `t=0.5` returns the midpoint. Useful for deriving intermediate steps in a color ramp from palette anchor points.
+  Example: `{{ mix(a=dark.secondary, b=dark.tertiary, t=0.5) }}` → `#353535`
 - `ron_color(color[, alpha])` → RON inline struct with `red`, `green`, `blue`, `alpha` float fields (0.0–1.0). `alpha` defaults to `1.0`. Use for `Srgba` fields in Cosmic desktop theme files (palette color slots, `bg_color`, container backgrounds).
   Example: `{{ ron_color(color=accents.info) }}` →
   ```ron
