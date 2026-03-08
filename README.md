@@ -108,6 +108,16 @@ When rendering, the Tera context exposes:
   Example: `{{ rgba_floats(color=dark.text, alpha=0.75) }}` → `0.902353 0.929413 0.952941 0.750000`
 - `blend(color, alpha, background)` → opaque `#RRGGBB` hex with alpha pre-composited over `background`. Useful for themes (e.g. Ghostty) that don't support alpha channels.
   Example: `{{ blend(color=dark.primary, alpha=0.15, background=dark.background) }}` → `#161C27`
+- `ron_color(color[, alpha])` → RON inline struct with `red`, `green`, `blue`, `alpha` float fields (0.0–1.0). `alpha` defaults to `1.0`. Useful for Cosmic desktop theme files.
+  Example: `{{ ron_color(color=accents.info) }}` →
+  ```ron
+  (
+          red: 0.2470588,
+          green: 0.6549020,
+          blue: 0.8392157,
+          alpha: 1.0000000,
+      )
+  ```
 - `lowercase` filter → lowercases a string.
   Example: `{{ accents.info | lowercase }}` → `#3fa7d6`
 
@@ -129,6 +139,13 @@ Example Ghostty template snippet (`ghostty.tera`):
 ```tera
 # Selection uses a pre-composited color since Ghostty doesn't support alpha
 selection-background = {{ blend(color=dark.primary, alpha=0.3, background=dark.background) }}
+```
+
+Example Cosmic desktop theme snippet (`Dark.ron.tera`):
+```tera
+accent: Some({{ ron_color(color=accents.info) }}),
+on_accent: Some({{ ron_color(color=dark.background) }}),
+accent_hover: Some({{ ron_color(color=accents.info, alpha=0.8) }}),
 ```
 
 Render it:

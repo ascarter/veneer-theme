@@ -113,6 +113,7 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("rgba", rgba);
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
+    tera.register_function("ron_color", ron_color);
     tera.register_function("blend", blend);
     tera.register_filter("lowercase", lowercase_filter);
 }
@@ -176,6 +177,23 @@ fn rgba_floats(args: &std::collections::HashMap<String, Value>) -> tera::Result<
     let b = b as f32 / 255.0;
 
     Ok(Value::String(format!("{r:.6} {g:.6} {b:.6} {alpha:.6}")))
+}
+
+fn ron_color(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
+    let color = expect_string(args, "color")?;
+    let alpha = args
+        .get("alpha")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0) as f32;
+    let (r, g, b) = hex_to_rgb(&color)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {color}")))?;
+    Ok(Value::String(format!(
+        "(\n        red: {:.7},\n        green: {:.7},\n        blue: {:.7},\n        alpha: {:.7},\n    )",
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+        alpha,
+    )))
 }
 
 /// Alpha-blend `color` at `alpha` over `background`, returning an opaque #RRGGBB hex.
@@ -490,6 +508,26 @@ white="#111111"
         let args = HashMap::new();
         let out = lowercase_filter(&Value::String("Emerald MIX".into()), &args).unwrap();
         assert_eq!(out, Value::String("emerald mix".into()));
+    }
+
+    #[test]
+    fn ron_color_formats_floats() {
+        use std::collections::HashMap;
+
+        // Default alpha = 1.0
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#6390CF".into()));
+        let out = ron_color(&args).unwrap();
+        assert!(out.as_str().unwrap().contains("red: 0.3882353"));
+        assert!(out.as_str().unwrap().contains("alpha: 1.0000000"));
+
+        // Explicit alpha
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#FFFFFF".into()));
+        args.insert("alpha".into(), serde_json::json!(0.5));
+        let out = ron_color(&args).unwrap();
+        assert!(out.as_str().unwrap().contains("red: 1.0000000"));
+        assert!(out.as_str().unwrap().contains("alpha: 0.5000000"));
     }
 
     #[test]
