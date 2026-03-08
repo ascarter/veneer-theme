@@ -114,6 +114,7 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
     tera.register_function("ron_color", ron_color);
+    tera.register_function("ron_rgb", ron_rgb);
     tera.register_function("blend", blend);
     tera.register_filter("lowercase", lowercase_filter);
 }
@@ -193,6 +194,18 @@ fn ron_color(args: &std::collections::HashMap<String, Value>) -> tera::Result<Va
         g as f32 / 255.0,
         b as f32 / 255.0,
         alpha,
+    )))
+}
+
+fn ron_rgb(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
+    let color = expect_string(args, "color")?;
+    let (r, g, b) = hex_to_rgb(&color)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {color}")))?;
+    Ok(Value::String(format!(
+        "(\n        red: {:.7},\n        green: {:.7},\n        blue: {:.7},\n    )",
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
     )))
 }
 
@@ -528,6 +541,20 @@ white="#111111"
         let out = ron_color(&args).unwrap();
         assert!(out.as_str().unwrap().contains("red: 1.0000000"));
         assert!(out.as_str().unwrap().contains("alpha: 0.5000000"));
+    }
+
+    #[test]
+    fn ron_rgb_formats_floats_without_alpha() {
+        use std::collections::HashMap;
+
+        let mut args = HashMap::new();
+        args.insert("color".into(), Value::String("#6390CF".into()));
+        let out = ron_rgb(&args).unwrap();
+        let s = out.as_str().unwrap();
+        assert!(s.contains("red: 0.3882353"));
+        assert!(s.contains("green: 0.5647059"));
+        assert!(s.contains("blue: 0.8117647"));
+        assert!(!s.contains("alpha"));
     }
 
     #[test]

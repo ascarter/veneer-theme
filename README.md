@@ -108,7 +108,7 @@ When rendering, the Tera context exposes:
   Example: `{{ rgba_floats(color=dark.text, alpha=0.75) }}` → `0.902353 0.929413 0.952941 0.750000`
 - `blend(color, alpha, background)` → opaque `#RRGGBB` hex with alpha pre-composited over `background`. Useful for themes (e.g. Ghostty) that don't support alpha channels.
   Example: `{{ blend(color=dark.primary, alpha=0.15, background=dark.background) }}` → `#161C27`
-- `ron_color(color[, alpha])` → RON inline struct with `red`, `green`, `blue`, `alpha` float fields (0.0–1.0). `alpha` defaults to `1.0`. Useful for Cosmic desktop theme files.
+- `ron_color(color[, alpha])` → RON inline struct with `red`, `green`, `blue`, `alpha` float fields (0.0–1.0). `alpha` defaults to `1.0`. Use for `Srgba` fields in Cosmic desktop theme files (palette color slots, `bg_color`, container backgrounds).
   Example: `{{ ron_color(color=accents.info) }}` →
   ```ron
   (
@@ -116,6 +116,15 @@ When rendering, the Tera context exposes:
           green: 0.6549020,
           blue: 0.8392157,
           alpha: 1.0000000,
+      )
+  ```
+- `ron_rgb(color)` → RON inline struct with `red`, `green`, `blue` float fields only (0.0–1.0), no alpha. Use for `Srgb` fields in Cosmic desktop theme files (`neutral_tint`, `text_tint`, `accent`, `success`, `warning`, `destructive`).
+  Example: `{{ ron_rgb(color=accents.info) }}` →
+  ```ron
+  (
+          red: 0.2470588,
+          green: 0.6549020,
+          blue: 0.8392157,
       )
   ```
 - `lowercase` filter → lowercases a string.
@@ -143,9 +152,12 @@ selection-background = {{ blend(color=dark.primary, alpha=0.3, background=dark.b
 
 Example Cosmic desktop theme snippet (`Dark.ron.tera`):
 ```tera
-accent: Some({{ ron_color(color=accents.info) }}),
-on_accent: Some({{ ron_color(color=dark.background) }}),
-accent_hover: Some({{ ron_color(color=accents.info, alpha=0.8) }}),
+{{/* Palette color slots are Srgba — use ron_color */}}
+accent_blue: {{ ron_color(color=accents.info) }},
+bg_color: Some({{ ron_color(color=dark.background) }}),
+{{/* Semantic override fields are Srgb (no alpha) — use ron_rgb */}}
+neutral_tint: Some({{ ron_rgb(color=dark.neutral) }}),
+accent: Some({{ ron_rgb(color=accents.info) }}),
 ```
 
 Render it:
