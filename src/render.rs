@@ -114,6 +114,7 @@ fn register_helpers(tera: &mut Tera) {
     tera.register_function("hsla", hsla);
     tera.register_function("rgba_floats", rgba_floats);
     tera.register_function("mix", mix);
+    tera.register_function("palette_color", palette_color);
     tera.register_function("ron_color", ron_color);
     tera.register_function("ron_rgb", ron_rgb);
     tera.register_function("blend", blend);
@@ -215,6 +216,46 @@ fn mix(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
         (a as f32 + t * (b as f32 - a as f32)).round() as u8
     };
     let (r, g, b) = (lerp(ar, br), lerp(ag, bg), lerp(ab, bb));
+    Ok(Value::String(format!("#{r:02X}{g:02X}{b:02X}")))
+}
+
+/// Generate a reasonable color for a named hue relative to a background color.
+///
+/// `name` maps to a hue: red, orange, yellow, green, cyan, blue, indigo, purple, pink, warm_grey.
+/// `background` is a `#RRGGBB` hex used to determine if we are on a dark or light surface.
+/// On a dark background (L < 0.5) the result is lightened (L ≈ 0.65); on a light background
+/// (L ≥ 0.5) it is darkened (L ≈ 0.35). Saturation is ~0.55 for chromatic names, ~0.08 for
+/// warm_grey. Returns a `#RRGGBB` hex, composable with `ron_color`.
+fn palette_color(args: &std::collections::HashMap<String, Value>) -> tera::Result<Value> {
+    let name = expect_string(args, "name")?;
+    let background = expect_string(args, "background")?;
+
+    let (hue, saturation): (f32, f32) = match name.to_lowercase().as_str() {
+        "red" => (0.0, 0.55),
+        "orange" => (30.0, 0.55),
+        "yellow" => (60.0, 0.55),
+        "green" => (120.0, 0.55),
+        "cyan" => (180.0, 0.55),
+        "blue" => (210.0, 0.55),
+        "indigo" => (245.0, 0.55),
+        "purple" => (270.0, 0.55),
+        "pink" => (330.0, 0.55),
+        "warm_grey" | "warmgrey" | "warm grey" => (30.0, 0.08),
+        other => {
+            return Err(tera::Error::msg(format!(
+                "palette_color: unknown color name '{other}'. \
+                 Valid names: red, orange, yellow, green, cyan, blue, indigo, purple, pink, warm_grey"
+            )));
+        }
+    };
+
+    let (br, bg, bb) = hex_to_rgb(&background)
+        .ok_or_else(|| tera::Error::msg(format!("invalid hex color: {background}")))?;
+    let (_, _, bg_lightness) = rgb_to_hsl(br, bg, bb);
+
+    let lightness = if bg_lightness < 0.5 { 0.65 } else { 0.35 };
+
+    let (r, g, b) = hsl_to_rgb(hue / 360.0, saturation, lightness);
     Ok(Value::String(format!("#{r:02X}{g:02X}{b:02X}")))
 }
 
@@ -342,6 +383,27 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     h /= 6.0;
 
     (h, s, l)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    if s.abs() < f32::EPSILON {
+        let v = (l * 255.0).round() as u8;
+        return (v, v, v);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let hue_to_rgb = |mut t: f32| -> f32 {
+        if t < 0.0 { t += 1.0; }
+        if t > 1.0 { t -= 1.0; }
+        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+        if t < 1.0 / 2.0 { return q; }
+        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        p
+    };
+    let r = (hue_to_rgb(h + 1.0 / 3.0) * 255.0).round() as u8;
+    let g = (hue_to_rgb(h) * 255.0).round() as u8;
+    let b = (hue_to_rgb(h - 1.0 / 3.0) * 255.0).round() as u8;
+    (r, g, b)
 }
 
 #[derive(Clone)]
@@ -609,6 +671,46 @@ white="#111111"
         assert!(s.contains("green: 0.5647059"));
         assert!(s.contains("blue: 0.8117647"));
         assert!(!s.contains("alpha"));
+    }
+
+    #[test]
+    fn palette_color_dark_bg_lightens_result() {
+        use std::collections::HashMap;
+
+        // Dark background (#1C1C1C): result should be lighter (L ≈ 0.65)
+        let mut args = HashMap::new();
+        args.insert("name".into(), Value::String("blue".into()));
+        args.insert("background".into(), Value::String("#1C1C1C".into()));
+        let out = palette_color(&args).unwrap();
+        let hex = out.as_str().unwrap();
+        let (r, g, b) = hex_to_rgb(hex).unwrap();
+        let (_, _, l) = rgb_to_hsl(r, g, b);
+        assert!(l > 0.5, "expected light color on dark bg, got L={l}");
+    }
+
+    #[test]
+    fn palette_color_light_bg_darkens_result() {
+        use std::collections::HashMap;
+
+        // Light background (#F0F0F0): result should be darker (L ≈ 0.35)
+        let mut args = HashMap::new();
+        args.insert("name".into(), Value::String("pink".into()));
+        args.insert("background".into(), Value::String("#F0F0F0".into()));
+        let out = palette_color(&args).unwrap();
+        let hex = out.as_str().unwrap();
+        let (r, g, b) = hex_to_rgb(hex).unwrap();
+        let (_, _, l) = rgb_to_hsl(r, g, b);
+        assert!(l < 0.5, "expected dark color on light bg, got L={l}");
+    }
+
+    #[test]
+    fn palette_color_unknown_name_errors() {
+        use std::collections::HashMap;
+
+        let mut args = HashMap::new();
+        args.insert("name".into(), Value::String("chartreuse".into()));
+        args.insert("background".into(), Value::String("#000000".into()));
+        assert!(palette_color(&args).is_err());
     }
 
     #[test]
